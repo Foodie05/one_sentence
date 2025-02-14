@@ -1,11 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:vibration/vibration.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:hive/hive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'package:single_sentence/api_value.dart';
 import 'package:single_sentence/cert.dart';
 import 'package:http/http.dart' as http;
+import 'package:single_sentence/pick_image.dart';
+import 'package:vibration/vibration_presets.dart';
 class RootPage extends StatefulWidget {
   @override
   State<RootPage> createState() => _RootPageState();
@@ -37,6 +41,8 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
   int green=148;
   int blue=196;
   DateTime otherTime=DateTime(1970);
+  Image? selectImage;
+  Image? recvImage;
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // TODO: implement didChangeAppLifecycleState
@@ -102,7 +108,7 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
 
       try {
         final response = await http.post(
-          Uri.parse('https://cruty.cn:8084/check'),
+          Uri.parse(urlToCheck),
           body: certForm,
         ).timeout(timeout, onTimeout: () {
           // 如果超时，手动触发超时逻辑
@@ -124,6 +130,7 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
           String? time = answerForm['sendTime'];
           String? msg = answerForm['message'];
           String ?recOtherTime = answerForm['otherVisitTime'];
+          String? recImage=answerForm['imageUrl'];
 
           otherTime=DateTime.tryParse(recOtherTime??'')??DateTime(1970);
 
@@ -133,6 +140,7 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
             }
             setState(() {});
           } else { // 有新的消息了
+            if(recImage!=null) recvImage=Image.network(recImage);
             isReadStatus = bool.parse(boolean) == true ? 3 : 2;
             sentTime = time;
             receiveTime = DateTime.parse(sentTime);
@@ -154,7 +162,7 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
                   'message': message
                 };
                 final response = await http.post(
-                  Uri.parse('https://cruty.cn:8084/read'),
+                  Uri.parse(urlToRead),
                   body: readForm,
                 );
                 if (response.statusCode != 200) {
@@ -190,6 +198,99 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
       blue=value.blue;
       _colorController.forward();
       print('on Color Changed');
+    }
+  }
+  Future<String?> uploadImage(Image imageData) async {
+    String preSignedUrl='';
+    try{
+      final response = await http.post(
+        Uri.parse(urlToRequestUpload),
+        body: {
+          'passwd':profile.get('passwd'),
+        },
+      );
+      if(response.statusCode==200){
+        preSignedUrl=response.body;
+      }else{
+        Fluttertoast.showToast(msg: '暂时无法发送图片');
+        return null;
+      }
+    }catch(e){
+      return null;
+    }
+    try {
+      final response = await http.put(
+        Uri.parse(preSignedUrl),
+        body: imageData,
+        headers: {'Content-Type': 'image/jpeg'}, // 根据图片格式调整
+      );
+      if (response.statusCode == 200) {
+        return preSignedUrl;
+      } else {
+        return null;
+      }
+    } catch (e) {
+      return null;
+    }
+  }
+  Future<void> sendMessage() async{
+    if((writeText!=''||selectImage!=null)&&isReadStatus==3&&isSending==false){
+      isSending=true;
+      setState(() {
+
+      });
+      String? imageUrl;
+      //uploadImageFirst
+      if(selectImage!=null){
+        imageUrl=await uploadImage(selectImage!);
+        if(imageUrl==null){
+          Fluttertoast.showToast(msg: '发送图片时出现异常，请重试.');
+          isSending=false;
+          setState(() {
+
+          });
+          return;
+        }
+      }
+      String alpha=pickerColor.value.alpha.toString();
+      String red=pickerColor.value.red.toString();
+      String green=pickerColor.value.green.toString();
+      String blue=pickerColor.value.blue.toString();
+      String msg=writeText;
+      final Map<String, String> certForm = {
+        'token': profile.get('passwd'),
+        'colorAlpha':alpha,
+        'colorRed':red,
+        'colorGreen':green,
+        'colorBlue':blue,
+        'message':msg,
+        'imageUrl':imageUrl??'',
+      };
+      final response = await http.post(
+        Uri.parse(urlToSend),
+        body: certForm,
+      );
+      if(response.statusCode==200){//成功发送
+        profile=Hive.box('profile');
+        profile.put('lastMessage', '$msg\n${DateTime.now().year.toString()}-'
+            '${DateTime.now().month.toString().padLeft(2,'0')}-'
+            '${DateTime.now().day.toString().padLeft(2,'0')} '
+            '${DateTime.now().hour.toString().padLeft(2,'0')}:'
+            '${DateTime.now().minute.toString().padLeft(2,'0')}:'
+            '${DateTime.now().second.toString().padLeft(2,'0')}');
+        Fluttertoast.showToast(msg: '发送成功！');
+        isReadStatus=2;
+        writeText='';
+        setState(() {
+
+        });
+      }else{
+        Fluttertoast.showToast(msg: '非常抱歉，发送失败：${response.body.toString()}');
+      }
+      isSending=false;
+      setState(() {
+
+      });
     }
   }
   @override
@@ -288,6 +389,11 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
                                           ),
                                         ),
                                       ),
+                                      if(recvImage!=null)
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(20),
+                                          child: recvImage,
+                                        ),
                                       Text(
                                         textAlign: TextAlign.center,
                                         message==''?'':receiveTimeStr,
@@ -331,111 +437,116 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
                         ),
                         Positioned(
                           bottom: 20,
-                          child: Container(
-                            margin: EdgeInsets.only(left: MediaQuery.of(context).size.width*0.15/2,right: MediaQuery.of(context).size.width*0.15/2),
-                            width: MediaQuery.of(context).size.width*0.85,
-                            height: 60,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(45),
-                              color: _colorChange.value==null?Color.fromARGB(50, red, green, blue):_colorChange.value!.withAlpha(50),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                SizedBox(width: 20,),
-                                Expanded(
-                                  child: isReadStatus<=2?Text('对方阅读前，您暂时不能发送消息哦～',style: TextStyle(
-                                      color: Colors.white54,
-                                      fontWeight: FontWeight.bold
-                                  ),):TextField(
-                                    style: TextStyle(color: Colors.white),
-                                    cursorColor: Colors.white54,
-                                    decoration: InputDecoration(
-                                      hintStyle: TextStyle(
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              //SizedBox(width: 20,),
+                              Container(
+                                width: 60,
+                                height: 60,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(40),
+                                  color: _colorChange.value==null?Color.fromARGB(50, red, green, blue):_colorChange.value!.withAlpha(50),
+                                ),
+                                child: selectImage==null?PickImage(
+                                  icon: Icon(Icons.add,color: isReadStatus==3?Colors.white60:Colors.white10,),
+                                  getImage: (Image image){
+                                    selectImage=image;
+                                    setState(() {
+
+                                    });
+                                  },
+                                  //isActivated: isReadStatus==3?true:false,
+                                ):GestureDetector(
+                                  child: Container(
+                                  height: 50,
+                                  width: 50,
+                                  child: ClipRRect(
+                                    child: Image(image: selectImage!.image,fit: BoxFit.cover,),
+                                    borderRadius: BorderRadius.circular(40),
+                                  ),
+                                ),
+                                  onTap: (){
+                                    Fluttertoast.showToast(msg: '已经选择照片啦～请双击以取消选择');
+                                  },
+                                  onDoubleTap: ()async{
+                                    selectImage=null;
+                                    if(await Vibration.hasVibrator()==true){
+                                      Vibration.vibrate(duration: 50); // 持续时间 100ms
+                                    }
+                                    setState(() {
+
+                                    });
+                                    return;
+                                  },
+                                ),
+                              ),
+                              SizedBox(width: 10,),
+                              Container(
+                                //margin: EdgeInsets.only(left: MediaQuery.of(context).size.width*0.15/2,right: MediaQuery.of(context).size.width*0.15/2),
+                                width: MediaQuery.of(context).size.width*0.85-30,
+                                height: 60,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(45),
+                                  color: _colorChange.value==null?Color.fromARGB(50, red, green, blue):_colorChange.value!.withAlpha(50),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    SizedBox(width: 20,),
+                                    Expanded(
+                                      child: isReadStatus<=2?Text('请等待对方的回音～',style: TextStyle(
                                           color: Colors.white54,
                                           fontWeight: FontWeight.bold
+                                      ),):TextField(
+                                        style: TextStyle(color: Colors.white),
+                                        cursorColor: Colors.white54,
+                                        decoration: InputDecoration(
+                                          hintStyle: TextStyle(
+                                              color: Colors.white54,
+                                              fontWeight: FontWeight.bold
+                                          ),
+                                          hintText: '写下你想说的话...',
+                                          contentPadding: EdgeInsets.only(top: 18),
+                                          border: InputBorder.none,
+                                        ),
+                                        maxLines: 10,
+                                        onChanged: (txt){
+                                          writeText=txt;
+                                          setState(() {
+
+                                          });
+                                        },
+
                                       ),
-                                      hintText: '写下你想说的话...',
-                                      contentPadding: EdgeInsets.only(top: 18),
-                                      border: InputBorder.none,
                                     ),
-                                    maxLines: 10,
-                                    onChanged: (txt){
-                                      writeText=txt;
-                                      setState(() {
-
-                                      });
-                                    },
-
-                                  ),
-                                ),
-                                SizedBox(width: 10),
-                                GestureDetector(
-                                  onTap: (){
-                                    showColorPicker();
-                                  },
-                                  child: Container(
-                                    width: 25,
-                                    decoration: BoxDecoration(
-                                      color: _colorChange.value??Color.fromARGB(alpha, red, green, blue),
-                                      shape: BoxShape.circle,
+                                    SizedBox(width: 10),
+                                    GestureDetector(
+                                      onTap: (){
+                                        showColorPicker();
+                                      },
+                                      child: Container(
+                                        width: 25,
+                                        decoration: BoxDecoration(
+                                          color: _colorChange.value??Color.fromARGB(alpha, red, green, blue),
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
                                     ),
-                                  ),
+                                    GestureDetector(
+                                      onTap: () async {
+                                        sendMessage();
+                                      },
+                                      child: isSending==true?CircularProgressIndicator():Icon(Icons.chevron_right_rounded,color: writeText==''?Colors.white10:Colors.white60,size: 30,),
+                                    ),
+                                    SizedBox(width: 10,),
+                                  ],
                                 ),
-                                GestureDetector(
-                                  onTap: () async {
-                                    if(writeText!=''&&isReadStatus==3&&isSending==false){
-                                      isSending=true;
-                                      setState(() {
-
-                                      });
-                                      String alpha=pickerColor.value.alpha.toString();
-                                      String red=pickerColor.value.red.toString();
-                                      String green=pickerColor.value.green.toString();
-                                      String blue=pickerColor.value.blue.toString();
-                                      String msg=writeText;
-                                      //进行平时消息检查
-                                      final Map<String, String> certForm = {
-                                        'token': profile.get('passwd'),
-                                        'colorAlpha':alpha,
-                                        'colorRed':red,
-                                        'colorGreen':green,
-                                        'colorBlue':blue,
-                                        'message':msg
-                                      };
-                                      final response = await http.post(
-                                        Uri.parse('https://cruty.cn:8084/send'),
-                                        body: certForm,
-                                      );
-                                      if(response.statusCode==200){//成功发送
-                                        profile=Hive.box('profile');
-                                        profile.put('lastMessage', '$msg\n${DateTime.now().year.toString()}-'
-                                            '${DateTime.now().month.toString().padLeft(2,'0')}-'
-                                            '${DateTime.now().day.toString().padLeft(2,'0')} '
-                                            '${DateTime.now().hour.toString().padLeft(2,'0')}:'
-                                            '${DateTime.now().minute.toString().padLeft(2,'0')}:'
-                                            '${DateTime.now().second.toString().padLeft(2,'0')}');
-                                        Fluttertoast.showToast(msg: '发送成功！');
-                                        isReadStatus=2;
-                                        writeText='';
-                                        setState(() {
-
-                                        });
-                                      }else{
-                                        Fluttertoast.showToast(msg: '非常抱歉，发送失败：${response.body.toString()}');
-                                      }
-                                      isSending=false;
-                                      setState(() {
-
-                                      });
-                                    }
-                                  },
-                                  child: isSending==true?CircularProgressIndicator():Icon(Icons.chevron_right_rounded,color: writeText==''?Colors.white10:Colors.white60,size: 30,),
-                                ),
-                                SizedBox(width: 10,),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                         )
                       ],
