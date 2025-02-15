@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:vibration/vibration.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:hive/hive.dart';
@@ -41,8 +44,8 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
   int green=148;
   int blue=196;
   DateTime otherTime=DateTime(1970);
-  Image? selectImage;
-  Image? recvImage;
+  String? selectImage;
+  Widget? recvImage;
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // TODO: implement didChangeAppLifecycleState
@@ -140,7 +143,21 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
             }
             setState(() {});
           } else { // 有新的消息了
-            if(recImage!=null) recvImage=Image.network(recImage);
+            if(recImage!=null) recvImage=CachedNetworkImage(
+                placeholder: (context, url) => SizedBox(
+                  height: 50, // 高度
+                  width: 50,  // 宽度
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      color: _colorChange.value == null
+                          ? pickerColor.value
+                          : _colorChange.value!,
+                    ),
+                  ),
+                ),
+                errorWidget: (context, url, error) => Icon(Icons.error), // 加载失败时的替代视图
+                imageUrl: recImage
+            );
             isReadStatus = bool.parse(boolean) == true ? 3 : 2;
             sentTime = time;
             receiveTime = DateTime.parse(sentTime);
@@ -200,13 +217,15 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
       print('on Color Changed');
     }
   }
-  Future<String?> uploadImage(Image imageData) async {
+  Future<String?> uploadImage(String imagePath) async {
     String preSignedUrl='';
+    String objName=randomString(16)+imagePath.substring(imagePath.lastIndexOf('.'));
     try{
       final response = await http.post(
         Uri.parse(urlToRequestUpload),
         body: {
           'passwd':profile.get('passwd'),
+          'object':objName,
         },
       );
       if(response.statusCode==200){
@@ -221,17 +240,28 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
     try {
       final response = await http.put(
         Uri.parse(preSignedUrl),
-        body: imageData,
+        body: File(imagePath).readAsBytesSync(),
         headers: {'Content-Type': 'image/jpeg'}, // 根据图片格式调整
       );
       if (response.statusCode == 200) {
-        return preSignedUrl;
+        return objName;
       } else {
+        print('==================\n${response.body}\n=================');
         return null;
       }
     } catch (e) {
+      print('==================\n$e\n=================');
       return null;
     }
+  }
+  String randomString(int length) {
+    final random = Random();
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    return String.fromCharCodes(
+        Iterable.generate(
+          length,
+              (_) => chars.codeUnitAt(random.nextInt(chars.length)),
+        ));
   }
   Future<void> sendMessage() async{
     if((writeText!=''||selectImage!=null)&&isReadStatus==3&&isSending==false){
@@ -288,6 +318,7 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
         Fluttertoast.showToast(msg: '非常抱歉，发送失败：${response.body.toString()}');
       }
       isSending=false;
+      selectImage=null;
       setState(() {
 
       });
@@ -381,7 +412,7 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
                                       Center( // 使用 Center 来横向居中文本
                                         child: Text(
                                           //textAlign: TextAlign.center,
-                                          message==''?'(等ta结束忙碌，一定会回复你～)':message,
+                                          message==''&&recvImage==null?'(等ta结束忙碌，一定会回复你～)':message,
                                           style: TextStyle(
                                             fontWeight: FontWeight.bold,
                                             fontSize: 35,
@@ -452,19 +483,19 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
                                 ),
                                 child: selectImage==null?PickImage(
                                   icon: Icon(Icons.add,color: isReadStatus==3?Colors.white60:Colors.white10,),
-                                  getImage: (Image image){
-                                    selectImage=image;
+                                  getImage: (String imagePath){
+                                    selectImage=imagePath;
                                     setState(() {
 
                                     });
                                   },
-                                  //isActivated: isReadStatus==3?true:false,
+                                  isActivated: isReadStatus==3?true:false,
                                 ):GestureDetector(
                                   child: Container(
                                   height: 50,
                                   width: 50,
                                   child: ClipRRect(
-                                    child: Image(image: selectImage!.image,fit: BoxFit.cover,),
+                                    child: Image(image: Image.file(File(selectImage!)).image,fit: BoxFit.cover,),
                                     borderRadius: BorderRadius.circular(40),
                                   ),
                                 ),
@@ -540,7 +571,7 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
                                       onTap: () async {
                                         sendMessage();
                                       },
-                                      child: isSending==true?CircularProgressIndicator():Icon(Icons.chevron_right_rounded,color: writeText==''?Colors.white10:Colors.white60,size: 30,),
+                                      child: isSending==true?CircularProgressIndicator():Icon(Icons.chevron_right_rounded,color: writeText==''&&selectImage==null?Colors.white10:Colors.white60,size: 30,),
                                     ),
                                     SizedBox(width: 10,),
                                   ],

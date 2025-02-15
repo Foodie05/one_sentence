@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:http/http.dart' as http;
@@ -64,9 +66,11 @@ class _CertState extends State<Cert> {
                   setState(() {
 
                   });
+                  String token=sha256Hash(passwd);
+                  String newToken=sha256Hash(newPasswd);
                   final Map<String, String> certForm = {
-                    'token': passwd,
-                    'newToken': newPasswd,
+                    'token': token,
+                    'newToken': newToken,
                   };
                   final response = await http.post(
                     Uri.parse('https://cruty.cn:8084/check'),
@@ -75,7 +79,7 @@ class _CertState extends State<Cert> {
                   if (response.statusCode == 200){//成功
                     Fluttertoast.showToast(msg: '验证成功！');
                     Box profile=Hive.box('profile');
-                    profile.put('passwd', newPasswd);
+                    profile.put('passwd', newToken);
                     if(mounted){
                       Future.delayed(Duration(milliseconds: 500),(){
                         Navigator.pop(context);
@@ -96,4 +100,14 @@ class _CertState extends State<Cert> {
       ),
     );
   }
+}
+String sha256Hash(String input) {
+  // 将字符串编码为 UTF-8
+  var bytes = utf8.encode(input);
+
+  // 计算 SHA-256 哈希
+  var digest = sha256.convert(bytes);
+
+  // 返回十六进制字符串形式的哈希值
+  return digest.toString();
 }

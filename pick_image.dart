@@ -7,7 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 class PickImage extends StatefulWidget {
   final Icon icon;
-  final void Function(Image image) getImage;
+  final void Function(String imagePath) getImage;
   final bool isActivated;
   const PickImage({
     super.key,
@@ -48,8 +48,7 @@ class _PickImageState extends State<PickImage> {
       )
     );
     if(imageData.isEmpty) return;
-    Image image=Image.file(File(imageData[0].path));
-    widget.getImage(image);
+    widget.getImage(imageData[0].path);
     return;
   }
   @override
