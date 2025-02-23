@@ -12,7 +12,6 @@ import 'package:single_sentence/api_value.dart';
 import 'package:single_sentence/cert.dart';
 import 'package:http/http.dart' as http;
 import 'package:single_sentence/pick_image.dart';
-import 'package:vibration/vibration_presets.dart';
 class RootPage extends StatefulWidget {
   @override
   State<RootPage> createState() => _RootPageState();
@@ -143,21 +142,25 @@ class _RootPageState extends State<RootPage> with WidgetsBindingObserver, Ticker
             }
             setState(() {});
           } else { // 有新的消息了
-            if(recImage!=null) recvImage=CachedNetworkImage(
-                placeholder: (context, url) => SizedBox(
-                  height: 50, // 高度
-                  width: 50,  // 宽度
-                  child: Center(
-                    child: CircularProgressIndicator(
-                      color: _colorChange.value == null
-                          ? pickerColor.value
-                          : _colorChange.value!,
+            if(recImage!=null&&recImage!=''){
+              recvImage=CachedNetworkImage(
+                  placeholder: (context, url) => SizedBox(
+                    height: 50, // 高度
+                    width: 50,  // 宽度
+                    child: Center(
+                      child: CircularProgressIndicator(
+                        color: _colorChange.value == null
+                            ? pickerColor.value
+                            : _colorChange.value!,
+                      ),
                     ),
                   ),
-                ),
-                errorWidget: (context, url, error) => Icon(Icons.error), // 加载失败时的替代视图
-                imageUrl: recImage
-            );
+                  errorWidget: (context, url, error) => Icon(Icons.error), // 加载失败时的替代视图
+                  imageUrl: recImage
+              );
+            } else{
+              recvImage=null;
+            }
             isReadStatus = bool.parse(boolean) == true ? 3 : 2;
             sentTime = time;
             receiveTime = DateTime.parse(sentTime);
